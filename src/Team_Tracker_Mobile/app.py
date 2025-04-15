@@ -1,7 +1,7 @@
 import os
 import toga
 from toga.style import Pack
-from toga.style.pack import COLUMN, CENTER
+from toga.style.pack import COLUMN, ROW, CENTER
 import requests
 
 # Classe auxiliar que representa um jogador, incluindo estatísticas.
@@ -54,9 +54,14 @@ class TeamTrackerMobile(toga.App):
         self.token = None
         self.user_info = None
         self.api_url = "https://teamtracker-production.up.railway.app"
+         # Inicializa as seleções para os Jogadores 
         self.players = []
         self.selected_player = None
         self.last_selected_player=None
+        # Inicializa as seleções para os jogos
+        self.games = []
+        self.jogo_selecionado = None
+        self.last_selected_jogo = None
 
     def startup(self):
         # Inicia a aplicação exibindo a tela de login.
@@ -350,10 +355,375 @@ class TeamTrackerMobile(toga.App):
     # Placeholders para outras telas
     # ---------------------------
     def show_jogos(self, widget):
-        self.main_window.info_dialog("Jogos", "Tela de Jogos (em desenvolvimento)")
+        # Cria a janela de Jogos
+        self.games_window = toga.Window(title="Jogos Agendados")
+        main_box = toga.Box(
+            style=Pack(direction=COLUMN, padding=20, alignment=CENTER, background_color="#e5e7eb")
+        )
 
-    def show_estatisticas(self, widget):
-        self.main_window.info_dialog("Estatísticas", "Tela de Estatísticas (em desenvolvimento)")
+        # ---------------------------------------
+        # Formulário para agendar novo jogo (compacto)
+        # ---------------------------------------
+        form_box = toga.Box(style=Pack(direction=COLUMN, padding=5, background_color="white", width=450))
+        form_title = toga.Label(
+            "Agendar Novo Jogo",
+            style=Pack(font_size=16, font_weight="bold", padding_bottom=5)
+        )
+        form_box.add(form_title)
+
+        # Linha 1: Data e Adversário
+        row1 = toga.Box(style=Pack(direction=ROW, padding_bottom=5))
+        
+        # Caixa para Data
+        data_box = toga.Box(style=Pack(direction=COLUMN, padding_right=20))
+        data_label = toga.Label("Data:", style=Pack(padding_bottom=5))
+        self.jogo_data_input = toga.TextInput(
+            placeholder="AAAA-MM-DD",
+            style=Pack(width=180)
+        )
+        data_box.add(data_label)
+        data_box.add(self.jogo_data_input)
+        
+        # Caixa para Adversário
+        adv_box = toga.Box(style=Pack(direction=COLUMN))
+        adv_label = toga.Label("Adversário:", style=Pack(padding_bottom=5))
+        self.jogo_adv_input = toga.TextInput(
+            placeholder="Nome do adversário",
+            style=Pack(width=180)
+        )
+        adv_box.add(adv_label)
+        adv_box.add(self.jogo_adv_input)
+        
+        row1.add(data_box)
+        row1.add(adv_box)
+        form_box.add(row1)
+
+        # Linha 2: Escalão e Clube
+        row2 = toga.Box(style=Pack(direction=ROW, padding_bottom=5))
+        
+        # Escalão
+        escalao_box = toga.Box(style=Pack(direction=COLUMN, padding_right=20))
+        escalao_label = toga.Label("Escalão:", style=Pack(padding_bottom=5))
+        predefined_escaloes = [
+            "Petizes 1ºano(Sub-6)", "Petizes 2ºano(Sub-7)",
+            "Traquinas 1ºano(Sub-8)", "Traquinas 2ºano(Sub-9)",
+            "Benjamins 1ºano(Sub-10)", "Benjamins 2ºano(Sub-11)",
+            "Infantis 1ºano(Sub-12)", "Infantis 2ºano(Sub-13)",
+            "Iniciados 1ºano(Sub-14)", "Iniciados 2ºano(Sub-15)",
+            "Juvenis 1ºano(Sub-16)", "Juvenis 2ºano(Sub-17)",
+            "Juniores 1ºano(Sub-18)", "Juniores 2ºano(Sub-19)"
+        ]
+        user_escalao = self.user_info.get("escalao", "Todos")
+        if user_escalao != "Todos":
+            self.jogo_escalao_input = toga.TextInput(value=user_escalao, style=Pack(width=180))
+            self.jogo_escalao_input.enabled = False
+        else:
+            items = ["Todos"] + predefined_escaloes
+            self.jogo_escalao_input = toga.Selection(items=items, style=Pack(width=180))
+            self.jogo_escalao_input.value = "Todos"
+        escalao_box.add(escalao_label)
+        escalao_box.add(self.jogo_escalao_input)
+        
+        # Clube
+        clube_box = toga.Box(style=Pack(direction=COLUMN))
+        clube_label = toga.Label("Clube:", style=Pack(padding_bottom=5))
+        user_clube = self.user_info.get("clube", "Todos")
+        if user_clube != "Todos":
+            self.jogo_clube_input = toga.TextInput(value=user_clube, style=Pack(width=180))
+            self.jogo_clube_input.enabled = False
+        else:
+            self.jogo_clube_input = toga.TextInput(placeholder="Clube", style=Pack(width=180))
+        clube_box.add(clube_label)
+        clube_box.add(self.jogo_clube_input)
+        
+        row2.add(escalao_box)
+        row2.add(clube_box)
+        form_box.add(row2)
+        
+        # Botão para agendar jogo (abaixo das duas linhas)
+        agendar_button = toga.Button(
+            "Agendar Jogo",
+            on_press=self.agendar_jogo_method,
+            style=Pack(padding_top=5)
+        )
+        form_box.add(agendar_button)
+        main_box.add(form_box)
+
+        # ---------------------------------------
+        # Lista de Jogos Agendados e Filtros (com filtros em linha)
+        # ---------------------------------------
+        list_box = toga.Box(
+            style=Pack(direction=COLUMN, padding=10, background_color="white", margin_top=20, width=500)
+        )
+        list_title = toga.Label(
+            "Jogos Agendados",
+            style=Pack(font_size=16, font_weight="bold", padding_bottom=10)
+        )
+        list_box.add(list_title)
+
+        # Filtros dispostos em linha
+        row_filter = toga.Box(style=Pack(direction=ROW, padding_bottom=10))
+        
+        # Caixa do filtro de Escalão
+        esc_box = toga.Box(style=Pack(direction=COLUMN, padding_right=20))
+        esc_label = toga.Label("Filtrar por Escalão:", style=Pack(padding_bottom=5))
+        if user_escalao != "Todos":
+            esc_items = [user_escalao]
+            self.filter_esc_selection = toga.Selection(
+                items=esc_items, style=Pack(width=200, padding_bottom=10)
+            )
+            self.filter_esc_selection.value = user_escalao
+            self.filter_esc_selection.enabled = False
+        else:
+            esc_items = ["Todos"] + predefined_escaloes
+            self.filter_esc_selection = toga.Selection(
+                items=esc_items, style=Pack(width=200, padding_bottom=10)
+            )
+            self.filter_esc_selection.value = "Todos"
+        esc_box.add(esc_label)
+        esc_box.add(self.filter_esc_selection)
+        
+        # Caixa do filtro de Clube
+        club_box = toga.Box(style=Pack(direction=COLUMN, padding_right=20))
+        club_label = toga.Label("Filtrar por Clube:", style=Pack(padding_bottom=5))
+        if user_clube != "Todos":
+            club_items = [user_clube]
+            self.filter_club_selection = toga.Selection(
+                items=club_items, style=Pack(width=200, padding_bottom=10)
+            )
+            self.filter_club_selection.value = user_clube
+            self.filter_club_selection.enabled = False
+        else:
+            self.filter_club_selection = toga.Selection(
+                items=["Todos"], style=Pack(width=200, padding_bottom=10)
+            )
+            self.filter_club_selection.value = "Todos"
+        club_box.add(club_label)
+        club_box.add(self.filter_club_selection)
+        
+        # Caixa para o botão de filtro
+        button_box = toga.Box(style=Pack(direction=COLUMN))
+        refresh_filter_button = toga.Button(
+            "Aplicar Filtro",
+            on_press=self.refresh_games,
+            style=Pack(width=100, padding_top=20)
+        )
+        button_box.add(refresh_filter_button)
+        
+        # Adiciona as caixas (Escalão, Clube e Botão) lado a lado
+        row_filter.add(esc_box)
+        row_filter.add(club_box)
+        row_filter.add(button_box)
+        list_box.add(row_filter)
+
+        # Tabela para listar os jogos – com as colunas: Data, Adversário, Escalão, Clube, Estado
+        self.games_table = toga.Table(
+            headings=["Data", "Adversário", "Escalão", "Clube", "Estado"],
+            data=[],
+            on_select=self.on_select_game,
+            style=Pack(flex=1)
+        )
+        list_box.add(self.games_table)
+
+        # Botões de ação (Ver Jogo e Remover Jogo)
+        actions_box = toga.Box(style=Pack(direction=COLUMN, alignment=CENTER, padding_top=10))
+        self.ver_jogo_button = toga.Button(
+            "Ver Jogo (em desenvolvimento)",
+            on_press=self.ver_jogo_placeholder,
+            style=Pack(padding=5)
+        )
+        self.remover_jogo_button = toga.Button(
+            "Remover Jogo",
+            on_press=self.remover_jogo_method,
+            style=Pack(padding=5)
+        )
+        actions_box.add(self.ver_jogo_button)
+        actions_box.add(self.remover_jogo_button)
+        list_box.add(actions_box)
+
+        main_box.add(list_box)
+
+        # Define o conteúdo e mostra a janela
+        self.games_window.content = main_box
+        self.games_window.show()
+
+        # Carrega os jogos a partir da API
+        self.load_games()
+
+
+    def load_games(self):
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            response = requests.get(f"{self.api_url}/api/jogos", headers=headers)
+            if response.status_code == 200:
+                # Ordena os jogos por data
+                jogos_data = sorted(response.json(), key=lambda j: j.get("data"))
+                self.games = jogos_data
+                # Atualiza o filtro de clubes se o usuário tiver "Todos" em clube
+                if self.user_info.get("clube", "Todos") == "Todos":
+                    clubs = sorted(list({ jogo.get("clube", "") for jogo in self.games }))
+                    clubs = ["Todos"] + clubs
+                    self.filter_club_selection.items = clubs
+                    self.filter_club_selection.value = "Todos"
+                self.refresh_games(None)
+            else:
+                self.main_window.error_dialog("Erro", "Não foi possível carregar os jogos.")
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    def refresh_games(self, widget):
+        selected_esc = self.filter_esc_selection.value
+        selected_club = self.filter_club_selection.value
+        filtered = []
+        for j in self.games:
+            match_esc = (selected_esc == "Todos") or (j.get("escalao") == selected_esc)
+            match_club = (selected_club == "Todos") or (j.get("clube") == selected_club)
+            if match_esc and match_club:
+                adv_field = j.get("adversario", "")
+                if self.jogo_selecionado and self.jogo_selecionado.get("id") == j.get("id"):
+                    adv_field = "→ " + adv_field
+                row = [
+                    j.get("data", ""),
+                    adv_field,
+                    j.get("escalao", ""),
+                    j.get("clube", ""),
+                    j.get("estado", "")
+                ]
+                filtered.append(row)
+        self.games_table.data = filtered
+
+    def on_select_game(self, widget):
+        # Obter a seleção real do widget
+        selected = self.games_table.selection
+        if not selected:
+            print("Nenhuma linha selecionada.")
+            return
+
+        # Se a seleção for múltipla, pega a primeira linha; caso contrário, utiliza o único item.
+        row = selected[0] if isinstance(selected, list) else selected
+        print("Linha selecionada:", row)
+        
+        try:
+            # Tenta extrair os atributos utilizando os nomes com acentos.
+            data_str = getattr(row, "data", None)
+            adversario_str = getattr(row, "adversário", None) or getattr(row, "adversario", None)
+            escalao_str = getattr(row, "escalão", None) or getattr(row, "escalao", None)
+            clube_str = getattr(row, "clube", None)
+            
+            if not (data_str and adversario_str and escalao_str and clube_str):
+                if hasattr(row, "cells"):
+                    cells = row.cells
+                    if len(cells) >= 4:
+                        data_str = str(cells[0])
+                        adversario_str = cells[1]
+                        escalao_str = cells[2]
+                        clube_str = cells[3]
+                    else:
+                        print("Dados insuficientes na linha para identificação do jogo.")
+                        return
+                else:
+                    print("Não foi possível extrair os dados necessários da linha.")
+                    return
+
+            self.jogo_selecionado = None
+            # Procura o jogo correspondente utilizando os quatro campos
+            for jogo in self.games:
+                if (jogo.get("data") == data_str and
+                    jogo.get("adversario") == adversario_str and
+                    jogo.get("escalao") == escalao_str and
+                    jogo.get("clube") == clube_str):
+                    self.jogo_selecionado = jogo
+                    self.last_selected_jogo = jogo  # Guarda a última seleção válida
+                    print("Jogo selecionado:", jogo)
+                    break
+
+            if self.jogo_selecionado is None:
+                print("Nenhum jogo correspondente encontrado para Data:", data_str,
+                    "Adversário:", adversario_str, "Escalão:", escalao_str, "Clube:", clube_str)
+
+            # Opcional: atualiza a tabela para refletir visualmente a seleção
+            self.refresh_games(None)
+            
+        except Exception as e:
+            print("Erro ao processar a seleção:", e)
+            self.jogo_selecionado = None
+
+
+
+    def agendar_jogo_method(self, widget):
+        # Recolhe os dados do formulário
+        data = self.jogo_data_input.value
+        adversario = self.jogo_adv_input.value
+        # Para escalão, verifica se o widget é TextInput ou Selection
+        if hasattr(self.jogo_escalao_input, "value"):
+            escalao = self.jogo_escalao_input.value
+        else:
+            escalao = ""
+        clube = self.jogo_clube_input.value
+        # Valida a existência dos dados
+        if not (data and adversario and escalao and clube):
+            self.main_window.error_dialog("Erro", "Por favor, preencha todos os campos.")
+            return
+        # Valida que, se o usuário tem escalão/clube específicos, os valores devem coincidir
+        if self.user_info.get("escalao", "Todos") != "Todos" and escalao != self.user_info.get("escalao"):
+            self.main_window.error_dialog("Erro", f"Você só pode agendar jogos do seu escalão ({self.user_info.get('escalao')}).")
+            return
+        if self.user_info.get("clube", "Todos") != "Todos" and clube != self.user_info.get("clube"):
+            self.main_window.error_dialog("Erro", f"Você só pode agendar jogos do seu clube ({self.user_info.get('clube')}).")
+            return
+        # Cria o payload para o POST
+        payload = {
+            "data": data,
+            "adversario": adversario,
+            "escalao": escalao,
+            "clube": clube
+        }
+        try:
+            url = f"{self.api_url}/api/jogos"
+            response = requests.post(url, json=payload)
+            if response.status_code in (200, 201):
+                self.main_window.info_dialog("Sucesso", "Jogo agendado com sucesso!")
+                # Limpa os campos do formulário
+                self.jogo_data_input.value = ""
+                self.jogo_adv_input.value = ""
+                if hasattr(self.jogo_escalao_input, "value") and self.user_info.get("escalao", "Todos") == "Todos":
+                    self.jogo_escalao_input.value = "Todos"
+                if hasattr(self.jogo_clube_input, "value") and self.user_info.get("clube", "Todos") == "Todos":
+                    self.jogo_clube_input.value = ""
+                self.load_games()
+            else:
+                error_message = response.json().get("detail", "Erro ao agendar o jogo.")
+                self.main_window.error_dialog("Erro", error_message)
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    async def remover_jogo_method(self, widget):
+        # Utiliza self.jogo_selecionado ou, se ausente, self.last_selected_jogo
+        jogo_to_remove = self.jogo_selecionado if self.jogo_selecionado is not None else getattr(self, 'last_selected_jogo', None)
+        if not jogo_to_remove:
+            self.main_window.error_dialog("Erro", "Selecione um jogo para remover.")
+            return
+        confirmar = await self.main_window.confirm_dialog("Confirmação", f"Tem certeza que deseja remover o jogo contra {jogo_to_remove.get('adversario')}?")
+        if not confirmar:
+            return
+        try:
+            url = f"{self.api_url}/api/jogos/{jogo_to_remove.get('id')}"
+            headers = {"Authorization": f"Bearer {self.token}"}
+            response = requests.delete(url, headers=headers)
+            if response.status_code in (200, 204):
+                self.main_window.info_dialog("Sucesso", "Jogo removido com sucesso!")
+                # Limpa a seleção
+                self.jogo_selecionado = None
+                self.last_selected_jogo = None
+                self.load_games()
+            else:
+                self.main_window.error_dialog("Erro", f"Erro ao remover jogo: {response.text}")
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    def ver_jogo_placeholder(self, widget):
+        # Placeholder para futura implementação da visualização dos detalhes do jogo
+        self.main_window.info_dialog("Ver Jogo", "Funcionalidade de ver jogo em desenvolvimento.")
 
     # Método para remover jogador utilizando o endpoint DELETE /api/jogadores/{jogador_id}
     async def remove_player(self, widget):
@@ -544,6 +914,143 @@ class TeamTrackerMobile(toga.App):
                 self.main_window.error_dialog("Erro", error_message)
         except Exception as e:
             self.main_window.error_dialog("Erro", str(e))
+    def show_estatisticas(self, widget):
+        # Cria uma nova janela para as estatísticas
+        self.stats_window = toga.Window(title="Estatísticas dos Jogadores")
+        main_box = toga.Box(style=Pack(direction=COLUMN, padding=20, alignment=CENTER, background_color="#e5e7eb"))
+
+        # Caixa de filtros
+        filter_box = toga.Box(style=Pack(direction=COLUMN, padding=10))
+        user_escalao = self.user_info.get("escalao", "Todos")
+        user_clube = self.user_info.get("clube", "Todos")
+
+        # Configuração do filtro de Escalão
+        escaloes = [
+            "Petizes 1ºano(Sub-6)", "Petizes 2ºano(Sub-7)",
+            "Traquinas 1ºano(Sub-8)", "Traquinas 2ºano(Sub-9)",
+            "Benjamins 1ºano(Sub-10)", "Benjamins 2ºano(Sub-11)",
+            "Infantis 1ºano(Sub-12)", "Infantis 2ºano(Sub-13)",
+            "Iniciados 1ºano(Sub-14)", "Iniciados 2ºano(Sub-15)",
+            "Juvenis 1ºano(Sub-16)", "Juvenis 2ºano(Sub-17)",
+            "Juniores 1ºano(Sub-18)", "Juniores 2ºano(Sub-19)"
+        ]
+        if user_escalao != "Todos":
+            escalao_items = [user_escalao]
+            escalao_default = user_escalao
+            escalao_disabled = True
+        else:
+            escalao_items = ["Todos"] + escaloes
+            escalao_default = "Todos"
+            escalao_disabled = False
+        self.escalao_selection = toga.Selection(
+            items=escalao_items,
+            style=Pack(width=300, padding_bottom=10)
+        )
+        self.escalao_selection.value = escalao_default
+        self.escalao_selection.enabled = not escalao_disabled
+
+        filter_box.add(toga.Label("Filtrar por Escalão:", style=Pack(padding_bottom=5)))
+        filter_box.add(self.escalao_selection)
+
+        # Configuração do filtro de Clube
+        if user_clube != "Todos":
+            clube_items = [user_clube]
+            clube_default = user_clube
+            clube_disabled = True
+        else:
+            clube_items = ["Todos"]
+            clube_default = "Todos"
+            clube_disabled = False
+        self.clube_selection = toga.Selection(
+            items=clube_items,
+            style=Pack(width=300, padding_bottom=10)
+        )
+        self.clube_selection.value = clube_default
+        self.clube_selection.enabled = not clube_disabled
+
+        filter_box.add(toga.Label("Filtrar por Clube:", style=Pack(padding_bottom=5)))
+        filter_box.add(self.clube_selection)
+
+        # Botão para atualizar a tabela conforme os filtros
+        refresh_button = toga.Button("Aplicar Filtro", on_press=self.refresh_stats, style=Pack(padding_bottom=10))
+        filter_box.add(refresh_button)
+        main_box.add(filter_box)
+
+        # Tabela para exibir as estatísticas
+        # As colunas serão: Foto, Número, Nome, Jogos, Golos, Assistências, CA, CV, TTU
+        self.stats_table = toga.Table(
+            headings=["Foto", "Número", "Nome", "Jogos", "Golos", "Assistências", "CA", "CV", "TTU"],
+            data=[],
+            style=Pack(flex=1)
+        )
+        main_box.add(self.stats_table)
+
+        # Botão para exportar para CSV
+        export_button = toga.Button("Exportar CSV", on_press=self.export_stats_csv, style=Pack(padding_top=10))
+        main_box.add(export_button)
+
+        self.stats_window.content = main_box
+        self.stats_window.show()
+
+        # Carrega os jogadores a partir da API e atualiza os filtros (no caso de utilizador com "Todos" no clube)
+        self.load_players_stats()
+
+    def load_players_stats(self):
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            response = requests.get(f"{self.api_url}/api/jogadores", headers=headers)
+            if response.status_code == 200:
+                self.all_players = response.json()  # Armazena todos os jogadores com estatísticas
+                # Se o clube do utilizador for "Todos", atualiza o widget com os clubes encontrados
+                if self.user_info.get("clube", "Todos") == "Todos":
+                    clubs = sorted(list({ player.get("clube", "") for player in self.all_players }))
+                    clubs = ["Todos"] + clubs
+                    self.clube_selection.items = clubs
+                    self.clube_selection.value = "Todos"
+                # Atualiza a tabela com os dados filtrados
+                self.refresh_stats(None)
+            else:
+                self.main_window.error_dialog("Erro", "Não foi possível carregar as estatísticas dos jogadores.")
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    def refresh_stats(self, widget):
+        # Aplica os filtros de escalão e clube e atualiza a tabela de estatísticas
+        selected_escalao = self.escalao_selection.value
+        selected_clube = self.clube_selection.value
+        filtered = []
+        for p in self.all_players:
+            match_escalao = (selected_escalao == "Todos") or (p.get("escalao") == selected_escalao)
+            match_clube = (selected_clube == "Todos") or (p.get("clube") == selected_clube)
+            if match_escalao and match_clube:
+                foto = "Foto" if p.get("foto") else "Sem foto"
+                row = [
+                    foto,
+                    str(p.get("numero", "")),
+                    p.get("nome", ""),
+                    str(p.get("jogosParticipados", 0)),
+                    str(p.get("golosMarcados", 0)),
+                    str(p.get("assistencias", 0)),
+                    str(p.get("CA", 0)),
+                    str(p.get("CV", 0)),
+                    str(p.get("TTU", 0))
+                ]
+                filtered.append(row)
+        self.stats_table.data = filtered
+
+    def export_stats_csv(self, widget):
+        # Gera uma string CSV com os dados exibidos na tabela (exceto a coluna "Foto")
+        header = ["Número", "Nome", "Jogos", "Golos", "Assistências", "CA", "CV", "TTU"]
+        csv_lines = [",".join(header)]
+        for row in self.stats_table.data:
+            csv_lines.append(",".join(row[1:]))  # ignora a primeira coluna (foto)
+        csv_content = "\n".join(csv_lines)
+        try:
+            with open("estatisticas_jogadores.csv", "w", encoding="utf-8") as f:
+                f.write(csv_content)
+            self.stats_window.info_dialog("Exportação CSV", "Arquivo CSV exportado com sucesso: estatisticas_jogadores.csv")
+        except Exception as e:
+            self.stats_window.error_dialog("Erro", str(e))
 
 def main():
     return TeamTrackerMobile()
