@@ -454,7 +454,7 @@ class TeamTrackerMobile(toga.App):
         # Lista de Jogos Agendados e Filtros (com filtros em linha)
         # ---------------------------------------
         list_box = toga.Box(
-            style=Pack(direction=COLUMN, padding=10, background_color="white", margin_top=20,height=200, width=500)
+            style=Pack(direction=COLUMN, padding=10, background_color="white", margin_top=20,height=400, width=500)
         )
         list_title = toga.Label(
             "Jogos Agendados",
