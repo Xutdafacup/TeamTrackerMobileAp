@@ -4,6 +4,7 @@ from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, CENTER
 import requests
 
+
 # Classe auxiliar que representa um jogador, incluindo estatísticas.
 class Player:
     def __init__(
@@ -453,7 +454,7 @@ class TeamTrackerMobile(toga.App):
         # Lista de Jogos Agendados e Filtros (com filtros em linha)
         # ---------------------------------------
         list_box = toga.Box(
-            style=Pack(direction=COLUMN, padding=10, background_color="white", margin_top=20, width=500)
+            style=Pack(direction=COLUMN, padding=10, background_color="white", margin_top=20,height=200, width=500)
         )
         list_title = toga.Label(
             "Jogos Agendados",
@@ -489,13 +490,13 @@ class TeamTrackerMobile(toga.App):
         if user_clube != "Todos":
             club_items = [user_clube]
             self.filter_club_selection = toga.Selection(
-                items=club_items, style=Pack(width=200, padding_bottom=10)
+                items=club_items, style=Pack(width=100, padding_bottom=10)
             )
             self.filter_club_selection.value = user_clube
             self.filter_club_selection.enabled = False
         else:
             self.filter_club_selection = toga.Selection(
-                items=["Todos"], style=Pack(width=200, padding_bottom=10)
+                items=["Todos"], style=Pack(width=100, padding_bottom=10)
             )
             self.filter_club_selection.value = "Todos"
         club_box.add(club_label)
@@ -529,7 +530,7 @@ class TeamTrackerMobile(toga.App):
         actions_box = toga.Box(style=Pack(direction=COLUMN, alignment=CENTER, padding_top=10))
         self.ver_jogo_button = toga.Button(
             "Ver Jogo (em desenvolvimento)",
-            on_press=self.ver_jogo_placeholder,
+            on_press=self.ver_jogo,
             style=Pack(padding=5)
         )
         self.remover_jogo_button = toga.Button(
@@ -720,10 +721,6 @@ class TeamTrackerMobile(toga.App):
                 self.main_window.error_dialog("Erro", f"Erro ao remover jogo: {response.text}")
         except Exception as e:
             self.main_window.error_dialog("Erro", str(e))
-
-    def ver_jogo_placeholder(self, widget):
-        # Placeholder para futura implementação da visualização dos detalhes do jogo
-        self.main_window.info_dialog("Ver Jogo", "Funcionalidade de ver jogo em desenvolvimento.")
 
     # Método para remover jogador utilizando o endpoint DELETE /api/jogadores/{jogador_id}
     async def remove_player(self, widget):
@@ -1051,6 +1048,375 @@ class TeamTrackerMobile(toga.App):
             self.stats_window.info_dialog("Exportação CSV", "Arquivo CSV exportado com sucesso: estatisticas_jogadores.csv")
         except Exception as e:
             self.stats_window.error_dialog("Erro", str(e))
+    def show_jogo_planeado(self, jogo):
+        """
+        Abre a janela para o jogo planeado, mostrando os detalhes do jogo e
+        as duas listas de jogadores: Disponíveis e Convocados.
+        """
+        self.jogo_selecionado = jogo
+
+        # Cria a nova janela
+        self.jogo_planeado_window = toga.Window(title="Jogo Planeado")
+        main_box = toga.Box(style=Pack(direction=COLUMN, padding=20))
+
+        detalhes_text = (
+            f"Data: {jogo.get('data')}\n"
+            f"Adversário: {jogo.get('adversario')}\n"
+            f"Escalão: {jogo.get('escalao')}\n"
+            f"Clube: {jogo.get('clube')}\n"
+            f"Estado: {jogo.get('estado')}"
+        )
+        detalhes_label = toga.Label(detalhes_text, style=Pack(padding_bottom=10))
+        main_box.add(detalhes_label)
+
+        # Define as tabelas com ordem: [Foto, Num, Nome, Posição]
+        # Ajustamos a largura total para acomodar melhor os campos Nome e Posição,
+        # mas vamos "reduzir" visualmente Foto e Num.
+        self.available_table = toga.Table(
+            headings=["Foto", "Num", "Nome", "Posição"],
+            data=[],
+            on_select=self.on_select_available,
+            style=Pack(width=700, flex=1)
+        )
+        self.convoked_table = toga.Table(
+            headings=["Foto", "Num", "Nome", "Posição"],
+            data=[],
+            on_select=self.on_select_convoked,
+            style=Pack(width=700, flex=1)
+        )
+
+        # Insere as tabelas num ScrollContainer para permitir visualizar muitas linhas
+        available_scroll = toga.ScrollContainer(
+            content=self.available_table,
+            style=Pack(height=300, flex=1, padding_right=10)
+        )
+        convoked_scroll = toga.ScrollContainer(
+            content=self.convoked_table,
+            style=Pack(height=300, flex=1, padding_left=10)
+        )
+
+        tables_box = toga.Box(style=Pack(direction=ROW, padding=10, alignment=CENTER))
+        tables_box.add(available_scroll)
+        tables_box.add(convoked_scroll)
+        main_box.add(tables_box)
+
+        # Botões para transferir jogadores
+        buttons_box = toga.Box(style=Pack(direction=ROW, alignment=CENTER, padding_top=10))
+        add_btn = toga.Button("➡️ Adicionar", on_press=self.add_convoked, style=Pack(padding=5))
+        remove_btn = toga.Button("⬅️ Remover", on_press=self.remove_convoked, style=Pack(padding=5))
+        buttons_box.add(add_btn)
+        buttons_box.add(remove_btn)
+        main_box.add(buttons_box)
+
+        confirm_btn = toga.Button("Avançar (Confirmar Convocatória)", on_press=self.confirm_convocation, style=Pack(padding_top=10))
+        main_box.add(confirm_btn)
+
+        self.jogo_planeado_window.content = main_box
+        self.jogo_planeado_window.show()
+
+        self.load_jogo_planeado_players(jogo)
+
+
+    def refresh_jogo_planeado_tables(self):
+        """
+        Atualiza as tabelas exibindo os jogadores disponíveis e os já convocados.
+        Ordem: [Foto, Num, Nome, Posição]
+        """
+        available_rows = []
+        for p in self.available_players:
+            foto_str = "Foto" if p.foto else "Sem foto"
+            available_rows.append([foto_str, str(p.numero), p.nome, p.posicao])
+        self.available_table.data = available_rows
+
+        convoked_rows = []
+        for p in self.convoked_players:
+            foto_str = "Foto" if p.foto else "Sem foto"
+            convoked_rows.append([foto_str, str(p.numero), p.nome, p.posicao])
+        self.convoked_table.data = convoked_rows
+
+
+    def on_select_available(self, widget):
+        """
+        Callback para seleção na tabela de disponíveis.
+        Usa a abordagem semelhante ao método on_select_player que funciona bem.
+        """
+        selected = widget.selection
+        if not selected:
+            print("Nenhuma linha selecionada na tabela de disponíveis.")
+            self.selected_available = None
+            return
+        row = selected[0] if isinstance(selected, list) else selected
+        print("Linha selecionada (Disponíveis):", row)
+        try:
+            numero_str = getattr(row, "num", None) or getattr(row, "número", None) or getattr(row, "numero", None)
+            nome_str = getattr(row, "nome", None)
+            if not numero_str or not nome_str:
+                if hasattr(row, "cells") and row.cells:
+                    cells = row.cells
+                    if len(cells) >= 3:
+                        numero_str = str(cells[1])
+                        nome_str = str(cells[2])
+                    else:
+                        print("Células insuficientes na tabela de disponíveis.")
+                        return
+                else:
+                    print("Não foi possível extrair 'num' ou 'nome' da linha de disponíveis.")
+                    return
+            self.selected_available = None
+            for player in self.available_players:
+                if str(player.numero) == str(numero_str) and player.nome == nome_str:
+                    self.selected_available = player
+                    print("Jogador selecionado (Disponíveis):", player)
+                    break
+            if self.selected_available is None:
+                print("Nenhum jogador correspondente encontrado na tabela de disponíveis para Num:", numero_str, "Nome:", nome_str)
+        except Exception as e:
+            print("Erro ao processar a seleção (Disponíveis):", e)
+            self.selected_available = None
+
+
+    def on_select_convoked(self, widget):
+        """
+        Callback para seleção na tabela de convocados.
+        Usa a mesma lógica do método on_select_player.
+        """
+        selected = widget.selection
+        if not selected:
+            print("Nenhuma linha selecionada na tabela de convocados.")
+            self.selected_convoked = None
+            return
+        row = selected[0] if isinstance(selected, list) else selected
+        print("Linha selecionada (Convocados):", row)
+        try:
+            numero_str = getattr(row, "num", None) or getattr(row, "número", None) or getattr(row, "numero", None)
+            nome_str = getattr(row, "nome", None)
+            if not numero_str or not nome_str:
+                if hasattr(row, "cells") and row.cells:
+                    cells = row.cells
+                    if len(cells) >= 3:
+                        numero_str = str(cells[1])
+                        nome_str = str(cells[2])
+                    else:
+                        print("Células insuficientes na tabela de convocados.")
+                        return
+                else:
+                    print("Não foi possível extrair 'num' ou 'nome' da linha de convocados.")
+                    return
+            self.selected_convoked = None
+            for player in self.convoked_players:
+                if str(player.numero) == str(numero_str) and player.nome == nome_str:
+                    self.selected_convoked = player
+                    print("Jogador selecionado (Convocados):", player)
+                    break
+            if self.selected_convoked is None:
+                print("Nenhum jogador correspondente encontrado na tabela de convocados para Num:", numero_str, "Nome:", nome_str)
+        except Exception as e:
+            print("Erro ao processar a seleção (Convocados):", e)
+            self.selected_convoked = None
+
+    def find_player_in_list(self, row, players_list):
+        """
+        Tenta identificar o objeto Player correspondente à linha selecionada,
+        utilizando os dados (número e nome). Nesta nova ordem de colunas:
+            índice 0 -> número
+            índice 1 -> nome
+        A função primeiro tenta obter os atributos 'num' e 'nome' do row,
+        e se não encontrados, recorre a row.cells.
+        """
+        try:
+            # Tenta extrair diretamente dos atributos do row
+            numero_str = getattr(row, "num", None) or getattr(row, "número", None) or getattr(row, "numero", None)
+            nome_str = getattr(row, "nome", None)
+            if not numero_str or not nome_str:
+                if hasattr(row, "cells") and row.cells:
+                    cells = row.cells
+                    if len(cells) >= 2:
+                        numero_str = str(cells[0])
+                        nome_str = str(cells[1])
+                    else:
+                        return None
+                else:
+                    return None
+            for p in players_list:
+                if str(p.numero) == str(numero_str) and p.nome == nome_str:
+                    return p
+            return None
+        except Exception as e:
+            print("Erro em find_player_in_list:", e)
+            return None
+
+    def load_jogo_planeado_players(self, jogo):
+        """
+        Carrega os jogadores do escalão e clube do jogo e os separa nas listas:
+        - available_players: jogadores disponíveis (mesmo clube e escalão) que ainda não foram convocados.
+        - convoked_players: jogadores já convocados para o jogo.
+        Armazena também a lista original de convocados para comparações posteriores.
+        """
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            # Busca jogadores pelo escalão (ajuste o endpoint se necessário)
+            jogadores_response = requests.get(
+                f"{self.api_url}/api/jogadores?escalao={jogo.get('escalao')}",
+                headers=headers
+            )
+            if jogadores_response.status_code == 200:
+                all_players_data = jogadores_response.json()
+                # Filtra apenas jogadores do mesmo clube do jogo
+                self.available_players = [Player(**p) for p in all_players_data if p.get("clube") == jogo.get("clube")]
+            else:
+                self.available_players = []
+
+            # Busca os jogadores já convocados para o jogo
+            conv_response = requests.get(
+                f"{self.api_url}/api/convocados/detalhes/{jogo.get('id')}",
+                headers=headers
+            )
+            if conv_response.status_code == 200:
+                convoked_data = conv_response.json()
+                self.convoked_players = [Player(**p) for p in convoked_data]
+            else:
+                self.convoked_players = []
+
+            # Remove os jogadores já convocados da lista de disponíveis
+            convoked_ids = {p.id for p in self.convoked_players}
+            self.available_players = [p for p in self.available_players if p.id not in convoked_ids]
+
+            # Armazena a lista original de convocados para comparar alterações na convocatória
+            self.original_convoked_players = self.convoked_players.copy()
+
+            self.refresh_jogo_planeado_tables()
+
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    def refresh_jogo_planeado_tables(self):
+        """
+        Atualiza as tabelas exibindo os jogadores disponíveis e os já convocados.
+        """
+        available_rows = []
+        for p in self.available_players:
+            foto_str = "Foto" if p.foto else "Sem foto"
+            available_rows.append([foto_str, str(p.numero), p.nome, p.posicao])
+        self.available_table.data = available_rows
+
+        convoked_rows = []
+        for p in self.convoked_players:
+            foto_str = "Foto" if p.foto else "Sem foto"
+            convoked_rows.append([foto_str, str(p.numero), p.nome, p.posicao])
+        self.convoked_table.data = convoked_rows
+
+
+    def add_convoked(self, widget):
+        """
+        Move o jogador selecionado da lista de disponíveis para a lista de convocados.
+        """
+        if not hasattr(self, "selected_available") or self.selected_available is None:
+            self.main_window.error_dialog("Erro", "Selecione um jogador na lista de disponíveis!")
+            return
+        player = self.selected_available
+        self.available_players = [p for p in self.available_players if p.id != player.id]
+        self.convoked_players.append(player)
+        self.selected_available = None
+        self.refresh_jogo_planeado_tables()
+
+    def remove_convoked(self, widget):
+        """
+        Move o jogador selecionado da lista de convocados de volta para a lista de disponíveis.
+        """
+        if not hasattr(self, "selected_convoked") or self.selected_convoked is None:
+            self.main_window.error_dialog("Erro", "Selecione um jogador na lista de convocados!")
+            return
+        player = self.selected_convoked
+        self.convoked_players = [p for p in self.convoked_players if p.id != player.id]
+        self.available_players.append(player)
+        self.selected_convoked = None
+        self.refresh_jogo_planeado_tables()
+
+    def confirm_convocation(self, widget):
+        """
+        Compara as listas original e atual de convocados, identifica os jogadores adicionados e removidos,
+        envia as chamadas à API correspondentes e atualiza o estado do jogo para "Em Curso".
+        """
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            jogo_id = self.jogo_selecionado.get("id")
+            original_ids = {p.id for p in self.original_convoked_players} if hasattr(self, "original_convoked_players") else set()
+            current_ids = {p.id for p in self.convoked_players}
+
+            # Identifica jogadores adicionados e removidos
+            added_ids = list(current_ids - original_ids)
+            removed_ids = list(original_ids - current_ids)
+
+            # Se houver jogadores removidos, envia DELETE em lote
+            if removed_ids:
+                del_payload = {"jogadores": removed_ids}
+                del_url = f"{self.api_url}/api/convocados/remover-varios/{jogo_id}"
+                del_response = requests.delete(del_url, json=del_payload, headers=headers)
+                if del_response.status_code not in (200, 204):
+                    self.main_window.error_dialog("Erro", "Falha ao remover alguns jogadores da convocatória.")
+                    return
+
+            # Se houver jogadores adicionados, envia POST
+            if added_ids:
+                add_payload = {"jogadores": added_ids}
+                add_url = f"{self.api_url}/api/convocados/{jogo_id}"
+                add_response = requests.post(add_url, json=add_payload, headers=headers)
+                if add_response.status_code not in (200, 201):
+                    self.main_window.error_dialog("Erro", "Falha ao adicionar alguns jogadores à convocatória.")
+                    return
+
+            # Atualiza o estado do jogo para "Em Curso" via PATCH
+            patch_url = f"{self.api_url}/api/jogos/{jogo_id}/estado"
+            new_status = "Em Curso"
+            patch_response = requests.patch(patch_url, json=new_status, headers={"Content-Type": "application/json"})
+            if patch_response.status_code in (200, 204):
+                self.main_window.info_dialog("Sucesso", "Convocatória confirmada e jogo iniciado!")
+                # Aqui você pode chamar o método para abrir a tela "Jogo Em Curso"
+                # ex: self.show_jogo_em_curso(self.jogo_selecionado)
+            else:
+                self.main_window.error_dialog("Erro", "Falha ao atualizar o estado do jogo.")
+        except Exception as e:
+            self.main_window.error_dialog("Erro", str(e))
+
+    # MÉTODOS DE VISUALIZAÇÃO DO JOGO
+
+    def ver_jogo(self, widget):
+        """
+        Método final para "Ver Jogo". Verifica o estado do jogo selecionado e
+        invoca a visualização correspondente:
+          - Para jogo planeado: chama show_jogo_planeado
+          - Para jogo em curso: chama show_jogo_em_curso (placeholder)
+          - Para jogo terminado: chama show_jogo_terminado (placeholder)
+        """
+        if not self.jogo_selecionado:
+            self.main_window.error_dialog("Erro", "Nenhum jogo selecionado!")
+            return
+
+        estado = self.jogo_selecionado.get("estado", "")
+
+        if estado.startswith("Resultado:"):
+            self.show_jogo_terminado(self.jogo_selecionado)
+        elif estado == "Planeado":
+            self.show_jogo_planeado(self.jogo_selecionado)
+        elif estado == "Em Curso":
+            self.show_jogo_em_curso(self.jogo_selecionado)
+        else:
+            self.main_window.error_dialog("Erro", "Estado do jogo desconhecido.")
+
+    def show_jogo_em_curso(self, jogo):
+        """
+        Placeholder para a visualização de um jogo em curso.
+        Futuramente, aqui serão implementadas as funcionalidades para gerenciar o cronómetro,
+        registrar eventos, atualizar estatísticas, etc.
+        """
+        self.main_window.info_dialog("Jogo Em Curso", "Funcionalidade de jogo em curso em desenvolvimento.")
+
+    def show_jogo_terminado(self, jogo):
+        """
+        Placeholder para a visualização dos detalhes de um jogo terminado.
+        Futuramente, aqui serão exibidos o resultado final e as estatísticas do jogo.
+        """
+        self.main_window.info_dialog("Jogo Terminado", "Funcionalidade de jogo terminado em desenvolvimento.")
 
 def main():
     return TeamTrackerMobile()
